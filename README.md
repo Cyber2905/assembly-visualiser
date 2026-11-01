@@ -4,7 +4,7 @@ A small browser tool that lets you step through x86-64 assembly one instruction 
 
 It's a single `index.html` file with no dependencies and no build step. Everything runs in your browser using a small, deterministic simulator written in plain JavaScript, so what you see is exactly what the instruction does.
 
-**Live demo:** https://cyber2905.github.io/asm-visualiser/ (after you enable GitHub Pages, see below)
+**Live demo:** https://cyber2905.github.io/assembly-visualiser/
 
 ## What it does
 
@@ -14,7 +14,6 @@ It's a single `index.html` file with no dependencies and no build step. Everythi
 - Colour coding shows what each thing is:
   - **Instructions:** stack (teal), copy data (blue), maths (purple), jump / call (orange)
   - **Stack slots:** return address, saved `rbp`, pushed value, local variable, and reserved-but-empty space
-- Helpful error messages with line numbers when the program can't run, such as unknown instructions with "did you mean...?" suggestions, wrong operand counts, memory-to-memory moves, missing labels, and a `ret` that doesn't find a return address.
 
 ## Supported syntax
 
@@ -47,12 +46,12 @@ Open `index.html` in any modern browser. That's it.
    git add index.html README.md
    git commit -m "Add x86-64 stack visualiser"
    git branch -M main
-   git remote add origin https://github.com/Cyber2905/asm-visualiser.git
+   git remote add origin https://github.com/Cyber2905/assembly-visualiser.git
    git push -u origin main
    ```
 4. On GitHub, open the repository's **Settings → Pages**.
 5. Under **Build and deployment**, set **Source** to **Deploy from a branch**, choose branch **main** and folder **/ (root)**, then click **Save**.
-6. Wait a minute or two. The page will be live at `https://cyber2905.github.io/asm-visualiser/`.
+6. Wait a minute or two. The page will be live at `https://cyber2905.github.io/assembly-visualiser/`.
 7. Paste that link into the "Live demo" line above and into the repository's **About** box.
 
 ## Known limitations
