@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>x86-64 stack visualiser</title>
+<style>
+:root{--bg:#e9eff3;--panel:#fff;--ink:#14213d;--mute:#5d6b7d;--line:#c5d0da;--hit:#ffd84d;--bad:#c0262d;
+--stack:#0a7e6b;--data:#1d5fd1;--math:#7a3fc4;--flow:#c2610c;--saved:#b0235f;--grey:#8a97a8}
+@media (prefers-color-scheme:dark){:root{--bg:#10192b;--panel:#18243a;--ink:#e6edf6;--mute:#93a3b8;--line:#2d3d57;--hit:#8a6d00;--bad:#ff7b80;
+--stack:#3ddbbd;--data:#6ea2ff;--math:#b98cff;--flow:#ffa04d;--saved:#ff7ab0;--grey:#7d8ba0}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif;padding:20px}
+main{max-width:1000px;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--mute);margin:0 0 16px;max-width:60ch}
+.mono,pre,textarea,td.v,.addr,code{font-family:ui-monospace,"SF Mono",Consolas,monospace}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+button{font:inherit;padding:6px 12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;cursor:pointer}
+button.main{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:600}
+button:hover:not(:disabled){border-color:var(--ink)}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,textarea:focus-visible{outline:2px solid var(--stack);outline-offset:2px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.card h2{font-size:.95rem;margin:0 0 8px;color:var(--mute);font-weight:600}
+textarea{width:100%;height:210px;font-size:14px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:10px;line-height:1.6;resize:vertical}
+.errs{margin:12px 0 0;padding:10px 14px 10px 30px;border-left:4px solid var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--panel));border-radius:0 6px 6px 0}
+.errs li{margin:4px 0}
+.errs b{color:var(--bad)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.cols{grid-template-columns:1fr}}
+/* colour system */
+.chip{display:inline-block;padding:0 8px;border-radius:99px;font-size:12.5px;font-weight:600;color:var(--c);background:color-mix(in srgb,var(--c) 16%,var(--panel));border:1px solid color-mix(in srgb,var(--c) 45%,transparent);white-space:nowrap}
+.stack{--c:var(--stack)}.data{--c:var(--data)}.math{--c:var(--math)}.flow{--c:var(--flow)}
+.k-saved{--c:var(--saved)}.k-ret{--c:var(--flow)}.k-pushed{--c:var(--stack)}.k-local{--c:var(--data)}.k-reserved{--c:var(--grey)}.k-caller{--c:var(--grey)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-bottom:14px;color:var(--mute);font-size:13px;align-items:center}
+.legend span.g{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.say{background:var(--panel);border-left:5px solid var(--c,var(--stack));padding:10px 14px;margin-bottom:14px;min-height:3.2em;border-radius:0 6px 6px 0;font-size:16px}
+.say.bad{--c:var(--bad)}
+/* program listing */
+pre{margin:0;font-size:14px}
+.ln{display:block;padding:2px 6px;border-radius:4px;white-space:pre;border-left:4px solid transparent}
+.ln .no{color:var(--mute);display:inline-block;width:2em}
+.ln .mn{font-weight:700;color:var(--c)}
+.ln.cur{background:color-mix(in srgb,var(--c) 18%,var(--panel));border-left-color:var(--c)}
+.ln.done{opacity:.55}
+/* tables */
+table{border-collapse:collapse;width:100%;font-size:14px}
+td{padding:4px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n{font-weight:700;width:3.6em}
+#regs tr.rsp{--c:var(--stack)}#regs tr.rbp{--c:var(--saved)}#regs tr.gp{--c:var(--data)}
+#regs td.n{color:var(--c);border-left:5px solid var(--c)}
+tr.hit td.v,tr.hit td.n+td{background:var(--hit)}
+#stack tr{border-left:6px solid var(--c)}
+#stack tr:not(.k-caller){background:color-mix(in srgb,var(--c) 11%,var(--panel))}
+#stack tr.k-reserved{background:repeating-linear-gradient(45deg,transparent 0 6px,color-mix(in srgb,var(--grey) 18%,transparent) 6px 12px)}
+#stack tr.k-caller{opacity:.55}
+#stack tr.hit td.v{background:var(--hit);color:var(--ink)}
+#stack td.addr{color:var(--mute);width:6.5em}
+#stack td.v{font-weight:600}
+.ptr{font-weight:700;white-space:nowrap}
+.ptr.sp{color:var(--stack)}.ptr.bp{color:var(--saved)}
+.note{color:var(--mute);font-size:13px;margin-top:10px}
+.down{text-align:center;color:var(--mute);font-size:12px;margin:6px 0 0}
+</style>
+</head>
+<body>
+<main>
+<h1>x86-64 stack visualiser</h1>
+
+<!-- ============ LANDING ============ -->
+<section id="landing">
+  <p class="sub">Type or paste a short assembly program, then step through it one instruction at a time. You'll see the registers and the stack change in colour as each line runs.</p>
+  <div class="card">
+    <h2>1. Enter your program</h2>
+    <textarea id="src" spellcheck="false" aria-label="Assembly source" placeholder="One instruction per line, for example:&#10;&#10;push rbp&#10;mov rbp, rsp&#10;sub rsp, 16"></textarea>
+    <div class="bar" style="margin:10px 0 0">
+      <button class="main" id="load">Visualise program</button>
+      <span style="color:var(--mute)">or try an example:</span>
+      <span id="examples" class="bar" style="margin:0"></span>
+    </div>
+    <ol class="errs" id="errs" hidden></ol>
+  </div>
+  <p class="note">Intel syntax. Supported: <code>push pop mov lea add sub xor call ret leave jmp nop</code> with the registers <code>rax rbx rcx rdx rsi rdi rbp rsp</code> (and 32-bit names like <code>eax</code>), numbers, and memory like <code>[rbp-8]</code>. Comments start with <code>;</code> and lines like <code>.globl main</code> are ignored, so you can paste output from Compiler Explorer.</p>
+  <p class="note">The program starts as if it were a function that was just called: <code>rdi</code> = 5, <code>rsi</code> = 7, and the return address is already on the stack.</p>
+</section>
+
+<!-- ============ VIEWER ============ -->
+<section id="viewer" hidden>
+  <div class="bar">
+    <button id="edit">&larr; Edit program</button>
+    <button id="back">Back</button>
+    <button class="main" id="step">Step &rarr;</button>
+    <button id="reset">Restart</button>
+    <span style="color:var(--mute);font-size:13px">Tip: use the left and right arrow keys.</span>
+  </div>
+  <div class="legend" aria-label="Colour key">
+    <span class="g"><b>Instructions:</b><span class="chip stack">stack</span><span class="chip data">copy data</span><span class="chip math">maths</span><span class="chip flow">jump / call</span></span>
+    <span class="g"><b>Stack slots:</b><span class="chip k-ret">return address</span><span class="chip k-saved">saved rbp</span><span class="chip k-pushed">pushed value</span><span class="chip k-local">local variable</span><span class="chip k-reserved">reserved, empty</span></span>
+    <span class="g"><span style="background:var(--hit);padding:0 8px;border-radius:99px;color:var(--ink);font-size:12.5px;font-weight:600">just changed</span></span>
+  </div>
+  <div class="say" id="say" aria-live="polite"></div>
+  <div class="cols">
+    <div>
+      <div class="card" style="margin-bottom:14px"><h2>Program</h2><pre id="prog"></pre></div>
+      <div class="card"><h2>Registers (small named storage boxes in the CPU)</h2><table id="regs"></table></div>
+    </div>
+    <div class="card"><h2>Stack (memory, drawn in 8-byte slots)</h2>
+      <p class="down" style="margin:0 0 6px">&uarr; higher addresses</p>
+      <table id="stack"></table>
+      <p class="down">&darr; lower addresses. The stack grows downward.</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const MASK = (1n << 64n) - 1n;
+const REGS = ['rax','rbx','rcx','rdx','rsi','rdi','rbp','rsp'];
+const ROLE = {rax:'return value',rdi:'argument 1',rsi:'argument 2',rbp:'frame base',rsp:'stack top'};
+const R32 = {eax:'rax',ebx:'rbx',ecx:'rcx',edx:'rdx',esi:'rsi',edi:'rdi',ebp:'rbp',esp:'rsp'};
+const OPS = {push:{n:1,cat:'stack'},pop:{n:1,cat:'stack'},leave:{n:0,cat:'stack'},mov:{n:2,cat:'data'},lea:{n:2,cat:'data'},
+  add:{n:2,cat:'math'},sub:{n:2,cat:'math'},xor:{n:2,cat:'math'},call:{n:1,cat:'flow'},jmp:{n:1,cat:'flow'},ret:{n:0,cat:'flow'},nop:{n:0,cat:'flow'}};
+const CODE = 0x401000n, START_RSP = 0x7ffe0100n, SENTINEL = 0x401136n;
+const KIND_NAME = {ret:'return address',saved:'saved rbp',pushed:'pushed value',local:'local variable',reserved:'reserved, empty'};
+
+const PRESETS = {
+  'Function prologue': `push rbp\nmov rbp, rsp\nsub rsp, 16`,
+  'Add two arguments': `push rbp\nmov rbp, rsp\nsub rsp, 16\nmov DWORD PTR [rbp-4], edi\nmov DWORD PTR [rbp-8], esi\nmov eax, DWORD PTR [rbp-4]\nadd eax, DWORD PTR [rbp-8]\nleave\nret`,
+  'Push and pop': `mov rax, 0x2a\npush rax\npush 7\npop rbx\npop rcx`,
+};
+
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const hex = (v, w = 8) => '0x' + (v & MASK).toString(16).padStart(w, '0').slice(-w);
+
+/* ---------- parsing and debugging ---------- */
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i-1][j] + 1, d[i][j-1] + 1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+function operand(s) {
+  let size = 8;
+  s = s.replace(/^(qword|dword)\s+ptr\s+/i, (_, z) => { size = z.toLowerCase() === 'dword' ? 4 : 8; return ''; }).trim();
+  if (/^(word|byte)\s+ptr/i.test(s)) throw new Error('only QWORD PTR and DWORD PTR sizes are supported');
+  const low = s.toLowerCase();
+  if (REGS.includes(low)) return { k: 'r', r: low, size: 8 };
+  if (R32[low]) return { k: 'r', r: R32[low], size: 4 };
+  const m = low.match(/^\[\s*(\w+)\s*(?:([+-])\s*(\w+))?\s*\]$/);
+  if (m) {
+    if (!REGS.includes(m[1])) throw new Error(`register "${m[1]}" isn't supported inside [ ] (use one of ${REGS.join(', ')})`);
+    if (m[3] && !/^(0x[0-9a-f]+|\d+)$/.test(m[3])) throw new Error(`the offset "${m[3]}" must be a number, like [rbp-8]`);
+    return { k: 'm', base: m[1], d: m[3] ? BigInt(m[3]) * (m[2] === '-' ? -1n : 1n) : 0n, size, text: s };
+  }
+  if (/^-?(0x[0-9a-f]+|\d+)$/.test(low)) return { k: 'i', v: BigInt.asUintN(64, BigInt(low)) };
+  if (/^(r\d+[dwb]?|[re]?[abcd]x|[abcd][lh]|[sd]il?|[sb]pl?|[re]?ip|xmm\d+)$/.test(low)) throw new Error(`register "${s}" isn't supported yet (try ${REGS.join(', ')})`);
+  if (/^[\w.$]+$/.test(s)) return { k: 'l', name: s };
+  throw new Error(`can't understand "${s}"`);
+}
+
+function parse(text) {
+  const out = [], lab = {}, errors = [];
+  const err = (line, src, msg) => errors.push({ line, src, msg });
+  text.split('\n').forEach((raw, i) => {
+    const n = i + 1;
+    let line = raw.replace(/(;|#|\/\/).*$/, '').trim();
+    if (!line) return;
+    if (/^\./.test(line) && !/:/.test(line)) return;
+    const lm = line.match(/^([\w.$]+):\s*(.*)$/);
+    if (lm) { if (lm[1] in lab) err(n, raw.trim(), `label "${lm[1]}" is defined twice`); lab[lm[1]] = out.length; line = lm[2]; if (!line) return; }
+    const [opRaw, ...rest] = line.split(/\s+/);
+    const op = opRaw.toLowerCase();
+    const spec = OPS[op];
+    if (!spec) {
+      const guess = Object.keys(OPS).filter(k => lev(op, k) <= 2).sort((a, b) => lev(op, a) - lev(op, b))[0];
+      return err(n, raw.trim(), `unknown instruction "${opRaw}".` + (guess ? ` Did you mean "${guess}"?` : ` Supported: ${Object.keys(OPS).join(', ')}.`));
+    }
+    const args = rest.join(' ').split(',').map(s => s.trim()).filter(Boolean);
+    if (args.length !== spec.n) return err(n, raw.trim(), `"${op}" needs ${spec.n} operand${spec.n === 1 ? '' : 's'} but got ${args.length}` + (spec.n === 2 ? ' (format: ' + op + ' destination, source)' : '') + '.');
+    let ops;
+    try { ops = args.map(operand); } catch (e) { return err(n, raw.trim(), e.message + '.'); }
+    const jump = op === 'call' || op === 'jmp';
+    if (!jump) { const bad = ops.find(o => o.k === 'l'); if (bad) return err(n, raw.trim(), `"${bad.name}" isn't a register or a number. Labels can only be used with call and jmp.`); }
+    if (jump && ops[0].k !== 'l') return err(n, raw.trim(), `${op} needs a label to jump to, like "${op} my_function".`);
+    if (['mov','add','sub','xor','lea','pop'].includes(op) && ops[0].k === 'i') return err(n, raw.trim(), `the first operand is where the result goes, so it can't be a number. Use a register or memory.`);
+    if (op === 'lea' && (ops[0].k !== 'r' || ops[1].k !== 'm')) return err(n, raw.trim(), `lea needs a register first and a memory address second, like "lea rax, [rbp-8]".`);
+    if (spec.n === 2 && ops[0].k === 'm' && ops[1].k === 'm') return err(n, raw.trim(), `x86 can't do memory to memory in one instruction. Go through a register first.`);
+    out.push({ op, args, text: line, line: n, cat: spec.cat });
+  });
+  out.forEach(p => { if (p.op === 'call' || p.op === 'jmp') if (!(p.args[0] in lab)) err(p.line, p.text, `label "${p.args[0]}" doesn't exist. Define it on its own line, like "${p.args[0]}:".`); });
+  if (!out.length && !errors.length) err(0, '', 'there are no instructions to run. Type at least one line.');
+  return { out, lab, errors: errors.sort((a, b) => a.line - b.line) };
+}
+
+/* ---------- machine ---------- */
+const fresh = () => ({
+  regs: { rax:0n, rbx:0n, rcx:0n, rdx:0n, rsi:7n, rdi:5n, rbp:0x7ffe0140n, rsp:START_RSP },
+  mem: new Map([[START_RSP, { v: SENTINEL, label: 'return address (to caller)', kind: 'ret' }]]),
+  pc: 0, done: false, bad: false, cat: 'stack', hitR: new Set(), hitM: new Set(),
+  say: 'Ready. Press Step to run the first instruction. The yellow marks will show what each step changes.'
+});
+const clone = s => ({ ...s, regs: { ...s.regs }, mem: new Map(s.mem), hitR: new Set(s.hitR), hitM: new Set(s.hitM) });
+let prog = [], labels = {}, state, history = [];
+
+const addrOf = (st, o) => BigInt.asUintN(64, st.regs[o.base] + o.d);
+function read(st, o) {
+  if (o.k === 'i') return o.v;
+  if (o.k === 'r') return o.size === 4 ? st.regs[o.r] & 0xffffffffn : st.regs[o.r];
+  const c = st.mem.get(addrOf(st, o)), v = c && c.v !== null ? c.v : 0n;
+  return o.size === 4 ? v & 0xffffffffn : v;
+}
+function write(st, o, v, label) {
+  v &= MASK;
+  if (o.k === 'r') { st.regs[o.r] = o.size === 4 ? v & 0xffffffffn : v; st.hitR.add(o.r); }
+  else { const a = addrOf(st, o); st.mem.set(a, { v: o.size === 4 ? v & 0xffffffffn : v, label, kind: 'local' }); st.hitM.add(a); }
+}
+const nm = o => o.k === 'r' ? (o.size === 4 ? Object.keys(R32).find(k => R32[k] === o.r) : o.r) : o.k === 'm' ? o.text : o.k === 'i' ? String(o.v) : o.name;
+function push(st, v, label, kind) {
+  st.regs.rsp -= 8n; st.hitR.add('rsp');
+  st.mem.set(st.regs.rsp, { v, label, kind }); st.hitM.add(st.regs.rsp);
+}
+function pop(st) {
+  const c = st.mem.get(st.regs.rsp); st.regs.rsp += 8n; st.hitR.add('rsp');
+  return c && c.v !== null ? c.v : 0n;
+}
+
+function exec(st) {
+  const ins = prog[st.pc], a = ins.args.map(operand);
+  st.hitR = new Set(); st.hitM = new Set(); st.cat = ins.cat;
+  const next = st.pc + 1; let pc = next, say;
+  switch (ins.op) {
+    case 'push': { const v = read(st, a[0]), saved = a[0].r === 'rbp';
+      push(st, v, saved ? 'saved rbp (caller\'s frame base)' : 'pushed ' + nm(a[0]), saved ? 'saved' : 'pushed');
+      say = `push: rsp moves down 8 bytes to ${hex(st.regs.rsp)}, then the value of ${nm(a[0])} is stored in that new slot.`; break; }
+    case 'pop': { const v = pop(st); write(st, a[0], v);
+      say = `pop: the value at the old stack top goes into ${nm(a[0])}, then rsp moves up 8 bytes. The slot still holds its old bytes, but it is no longer in use.`; break; }
+    case 'mov': write(st, a[0], read(st, a[1]), 'copy of ' + nm(a[1]));
+      say = `mov: copies ${nm(a[1])} into ${nm(a[0])}.` + (a[0].r === 'rbp' && a[1].r === 'rsp' ? ' rbp now marks the base of this function\'s frame.' : ''); break;
+    case 'lea': write(st, a[0], addrOf(st, a[1]));
+      say = `lea: puts the address ${hex(addrOf(st, a[1]))} (not the value stored there) into ${nm(a[0])}.`; break;
+    case 'add': write(st, a[0], read(st, a[0]) + read(st, a[1]), 'sum');
+      say = `add: ${nm(a[0])} = ${nm(a[0])} + ${nm(a[1])}.`; break;
+    case 'sub': {
+      const amt = read(st, a[1]); write(st, a[0], read(st, a[0]) - amt, 'result');
+      say = a[0].r === 'rsp' && a[0].size === 8 ? `sub: rsp moves down ${amt} bytes, reserving room for local variables. The new slots are empty until something is written to them.` : `sub: ${nm(a[0])} = ${nm(a[0])} - ${nm(a[1])}.`;
+      if (a[0].r === 'rsp' && a[0].k === 'r') for (let x = st.regs.rsp; x < st.regs.rsp + amt; x += 8n) if (!st.mem.has(x)) st.mem.set(x, { v: null, label: 'reserved for locals', kind: 'reserved' });
+      break; }
+    case 'xor': write(st, a[0], read(st, a[0]) ^ read(st, a[1]), 'result');
+      say = `xor: ${nm(a[0])} = ${nm(a[0])} XOR ${nm(a[1])}.` + (a[0].k === 'r' && a[1].k === 'r' && a[0].r === a[1].r ? ' XOR-ing a register with itself is the usual trick for setting it to 0.' : ''); break;
+    case 'leave': st.regs.rsp = st.regs.rbp; st.regs.rbp = pop(st); st.hitR.add('rbp');
+      say = 'leave: sets rsp back to rbp (throwing away the locals), then pops the saved rbp. The caller\'s frame base is restored.'; break;
+    case 'call': push(st, CODE + 4n * BigInt(next), 'return address', 'ret'); pc = labels[a[0].name];
+      say = `call: stores the address to come back to on the stack, then jumps to ${a[0].name}.`; break;
+    case 'jmp': pc = labels[a[0].name]; say = `jmp: continues from ${a[0].name} instead of the next line.`; break;
+    case 'ret': { const r = pop(st);
+      if (r === SENTINEL) { st.done = true; say = 'ret: takes the return address off the stack and goes back to the caller. The function has finished.'; }
+      else if (r >= CODE && (r - CODE) % 4n === 0n && Number((r - CODE) / 4n) <= prog.length) { pc = Number((r - CODE) / 4n); say = 'ret: takes the return address off the stack and jumps to it.'; }
+      else throw new Error(`ret took ${hex(r)} off the stack, which isn't a return address. Check that every push has a matching pop, or that you used "leave" (or reset rsp) before ret.`);
+      break; }
+    default: say = 'nop: does nothing.';
+  }
+  st.pc = pc; st.say = say;
+  if (st.pc >= prog.length && !st.done) { st.done = true; st.say += ' That was the last instruction.'; }
+}
+
+/* ---------- UI ---------- */
+function stepFwd() {
+  if (state.done) return;
+  const next = clone(state), ins = prog[state.pc];
+  try { exec(next); history.push(state); state = next; }
+  catch (e) { state = clone(state); state.say = `Line ${ins.line} (${ins.text}): ${e.message}`; state.bad = true; state.done = true; }
+  render();
+}
+function stepBack() { if (history.length) { state = history.pop(); render(); } }
+function reset() { state = fresh(); history = []; render(); }
+
+function load() {
+  const { out, lab, errors } = parse($('src').value), box = $('errs');
+  if (errors.length) {
+    box.hidden = false;
+    box.innerHTML = `<li><b>${errors.length} problem${errors.length > 1 ? 's' : ''} to fix before this can run:</b></li>` + errors.map(e =>
+      `<li>${e.line ? `<b>Line ${e.line}</b> <code>${esc(e.src)}</code><br>` : ''}${esc(e.msg)}</li>`).join('');
+    return;
+  }
+  box.hidden = true; prog = out; labels = lab;
+  $('landing').hidden = true; $('viewer').hidden = false; reset();
+}
+
+function render() {
+  const say = $('say');
+  say.textContent = state.say; say.className = 'say ' + (state.bad ? 'bad' : state.pc === 0 && !history.length ? '' : state.cat);
+  $('prog').innerHTML = prog.map((p, i) => {
+    const cur = i === state.pc && !state.done;
+    return `<span class="ln ${p.cat} ${cur ? 'cur' : (i < state.pc || state.done) ? 'done' : ''}"><span class="no">${p.line}</span>${cur ? '▶ ' : '  '}<span class="mn">${p.op}</span> ${esc(p.args.join(', '))}</span>`;
+  }).join('');
+  $('regs').innerHTML = REGS.map(r => `<tr class="${r === 'rsp' ? 'rsp' : r === 'rbp' ? 'rbp' : 'gp'} ${state.hitR.has(r) ? 'hit' : ''}"><td class="n">${r}</td><td class="v">${hex(state.regs[r], 16)}</td><td class="mono">${state.regs[r]}</td><td>${ROLE[r] ? `<span class="chip" style="--c:var(--${r === 'rsp' ? 'stack' : r === 'rbp' ? 'saved' : 'grey'})">${ROLE[r]}</span>` : ''}</td></tr>`).join('');
+  const top = START_RSP + 24n, bot = [state.regs.rsp, START_RSP - 48n, ...state.mem.keys()].reduce((a, b) => a < b ? a : b);
+  let rows = '';
+  for (let a = top; a >= bot; a -= 8n) {
+    const c = state.mem.get(a), caller = a > START_RSP, kind = c ? c.kind : caller ? 'caller' : 'empty';
+    const tags = [a === state.regs.rsp ? '<span class="ptr sp">◀ rsp</span>' : '', a === state.regs.rbp ? '<span class="ptr bp">◀ rbp</span>' : ''].join(' ');
+    const val = c ? (c.v === null ? '??' : hex(c.v, 16)) : caller ? '…' : '';
+    const chip = c ? `<span class="chip">${KIND_NAME[c.kind]}</span> <span style="color:var(--mute);font-size:13px">${esc(c.label || '')}</span>` : caller ? `<span style="color:var(--mute);font-size:13px">caller's frame</span>` : '';
+    rows += `<tr class="k-${kind} ${state.hitM.has(a) ? 'hit' : ''}"><td class="addr">${hex(a)}</td><td class="v">${val}</td><td>${chip}</td><td>${tags}</td></tr>`;
+  }
+  $('stack').innerHTML = rows;
+  $('step').disabled = state.done; $('back').disabled = !history.length;
+}
+
+Object.keys(PRESETS).forEach(k => {
+  const b = document.createElement('button'); b.textContent = k;
+  b.onclick = () => { $('src').value = PRESETS[k]; $('errs').hidden = true; };
+  $('examples').append(b);
+});
+$('load').onclick = load;
+$('src').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) load(); });
+$('step').onclick = stepFwd; $('back').onclick = stepBack; $('reset').onclick = reset;
+$('edit').onclick = () => { $('viewer').hidden = true; $('landing').hidden = false; $('src').focus(); };
+addEventListener('keydown', e => {
+  if ($('viewer').hidden || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowRight') stepFwd(); else if (e.key === 'ArrowLeft') stepBack();
+});
+</script>
+</body>
+</html>
